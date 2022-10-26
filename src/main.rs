@@ -134,7 +134,7 @@ struct Graph {
   size: usize,
   vertices: SmallVec<[Clique; 256]>,
   cliques: SmallVec<[Clique; 256]>,
-  max_active_clique_index: usize,
+  cliques_ct: usize,
   utility_bv: BitVec,
 }
 
@@ -155,7 +155,7 @@ impl Graph {
       size: num_vertices,
       vertices: vertices_vec,
       cliques: cliques_vec,
-      max_active_clique_index: num_vertices - 1,
+      cliques_ct: num_vertices,
       utility_bv: BitVec::zeros(num_vertices),
     }
   }
@@ -215,20 +215,20 @@ impl Graph {
   }
 
   fn shuffle_active_cliques(&mut self) {
-    fastrand::shuffle(&mut self.cliques[0..(self.max_active_clique_index + 1)]);
+    fastrand::shuffle(&mut self.cliques[0..(self.cliques_ct)]);
   }
 
   fn reverse_active_cliques(&mut self) {
-    self.cliques[0..(self.max_active_clique_index + 1)].reverse();
+    self.cliques[0..(self.cliques_ct)].reverse();
   }
 
   fn vcc_greedy(&mut self) {
     // Try to merge every active pair of cliques
-    for i in 0..self.max_active_clique_index {
+    for i in 0..(self.cliques_ct - 1) {
       if !self.cliques[i].is_active {
         continue;
       }
-      for j in (i + 1)..(self.max_active_clique_index + 1) {
+      for j in (i + 1)..(self.cliques_ct) {
         if !self.cliques[j].is_active {
           continue;
         }
@@ -243,27 +243,22 @@ impl Graph {
         );
       }
     }
-    // update cliques so active cliques precede inactive cliques
-    let mut i = 0;
-    let mut j = self.max_active_clique_index;
-    let mut new_max_active_clique_index = 0;
+
+    let mut i = 1;
     loop {
-      if i > j {
+      if i >= self.cliques_ct {
         break;
       }
       if self.cliques[i].is_active {
-        new_max_active_clique_index = i;
         i += 1;
-      } else if self.cliques[j].is_active {
-        self.cliques.swap(i, j);
-        new_max_active_clique_index = i;
+      } else if self.cliques[self.cliques_ct - 1].is_active {
+        self.cliques.swap(i, self.cliques_ct - 1);
         i += 1;
-        j -= 1;
+        self.cliques_ct -= 1;
       } else {
-        j -= 1;
+        self.cliques_ct -= 1;
       }
     }
-    self.max_active_clique_index = new_max_active_clique_index;
   }
 
   fn vcc_iterated_greedy(&mut self, reverse_fraction: f64) {
@@ -281,23 +276,23 @@ impl Graph {
     target: usize,
     reverse_fraction: f64,
   ) -> bool {
-    let mut pri_cliques = self.max_active_clique_index + 1;
+    let mut pri_cliques = self.cliques_ct;
     let mut current = Instant::now();
     for i in 1..(num_iterations + 1) {
       self.vcc_iterated_greedy(reverse_fraction);
-      if i % 1_000_000 == 0 || self.max_active_clique_index + 1 < pri_cliques {
+      if i % 1_000_000 == 0 || self.cliques_ct < pri_cliques {
         println!(
           "Iteration {:0>3}_{:0>3}_{:0>3}: {} -> {} ({:?})",
           (i % 1_000_000_000) / 1_000_000,
           (i % 1_000_000) / 1_000,
           i % 1000,
           pri_cliques,
-          self.max_active_clique_index + 1,
+          self.cliques_ct,
           current.elapsed()
         );
         current = Instant::now();
-        pri_cliques = self.max_active_clique_index + 1;
-        if self.max_active_clique_index + 1 <= target {
+        pri_cliques = self.cliques_ct;
+        if self.cliques_ct <= target {
           return true;
         }
       }
@@ -309,7 +304,7 @@ impl Graph {
     for i in 0..self.size {
       transcribe_clique_onto_clique(&self.vertices[i], &mut self.cliques[i]);
     }
-    self.max_active_clique_index = self.size - 1;
+    self.cliques_ct = self.size;
   }
 
   fn to_vertex_string(&self) -> String {
@@ -323,7 +318,7 @@ impl Graph {
 
   fn to_string(&self) -> String {
     let mut ret_str = String::new();
-    for i in 0..(self.max_active_clique_index + 1) {
+    for i in 0..(self.cliques_ct) {
       ret_str += &self.cliques[i].to_string();
       ret_str += "\n";
     }
@@ -357,10 +352,10 @@ fn get_random_graph(num_vertices: usize, edge_probability: f64) -> Graph {
 
 fn get_random_graph_with_k_cliques(
   num_vertices: usize,
-  num_cliques: usize,
+  cliques_ct: usize,
   edge_probability: f64,
 ) -> Graph {
-  if num_cliques == 0 {
+  if cliques_ct == 0 {
     return get_random_graph(num_vertices, edge_probability);
   }
 
@@ -368,9 +363,9 @@ fn get_random_graph_with_k_cliques(
   let mut edge_candidates_remaining = num_vertices * (num_vertices - 1) / 2;
   let mut edges_remaining = (edge_candidates_remaining as f64 * edge_probability) as usize;
 
-  let reserved_edges =
-    num_cliques * (num_vertices / num_cliques) * (num_vertices / num_cliques - 1) / 2
-      + (num_vertices % num_cliques) * (num_vertices / num_cliques);
+  let reserved_edges = cliques_ct * (num_vertices / cliques_ct) * (num_vertices / cliques_ct - 1)
+    / 2
+    + (num_vertices % cliques_ct) * (num_vertices / cliques_ct);
   edge_candidates_remaining -= reserved_edges;
   if reserved_edges > edges_remaining {
     edges_remaining = 0;
@@ -380,7 +375,7 @@ fn get_random_graph_with_k_cliques(
 
   for i in 0..(ret_graph.size - 1) {
     for j in (i + 1)..(ret_graph.size) {
-      if i % num_cliques == j % num_cliques {
+      if i % cliques_ct == j % cliques_ct {
         ret_graph.vertices[i].neighbors_bv.set(j, true);
         ret_graph.vertices[j].neighbors_bv.set(i, true);
       } else if fastrand::f64() < (edges_remaining as f64) / (edge_candidates_remaining as f64) {
@@ -389,7 +384,7 @@ fn get_random_graph_with_k_cliques(
         ret_graph.vertices[j].neighbors_bv.set(i, true);
       }
 
-      if i % num_cliques != j % num_cliques {
+      if i % cliques_ct != j % cliques_ct {
         edge_candidates_remaining -= 1;
       }
     }
@@ -410,7 +405,7 @@ fn clear_screen() {
 fn main() {
   let args: Vec<String> = env::args().collect();
   let num_vertices: usize = args[1].parse().unwrap();
-  let num_cliques: usize = args[2].parse().unwrap();
+  let cliques_ct: usize = args[2].parse().unwrap();
   let edge_fraction: f64 = args[3].parse().unwrap();
   let max_iterations_str: String = args[4].parse().unwrap();
   let max_iterations: usize = max_iterations_str.replace('_', "").parse().unwrap();
@@ -418,18 +413,18 @@ fn main() {
   clear_screen();
   println!(
     "cargo run --release {} {} {} {} {}",
-    num_vertices, num_cliques, edge_fraction, max_iterations_str, reverse_fraction
+    num_vertices, cliques_ct, edge_fraction, max_iterations_str, reverse_fraction
   );
-  let mut g = get_random_graph_with_k_cliques(num_vertices, num_cliques, edge_fraction);
+  let mut g = get_random_graph_with_k_cliques(num_vertices, cliques_ct, edge_fraction);
   let mut best_result: usize = num_vertices;
   loop {
-    if g.vcc_run_iterations_to_target(max_iterations, num_cliques, reverse_fraction) {
+    if g.vcc_run_iterations_to_target(max_iterations, cliques_ct, reverse_fraction) {
       println!("\n{}", g.to_string());
-      g = get_random_graph_with_k_cliques(num_vertices, num_cliques, edge_fraction);
+      g = get_random_graph_with_k_cliques(num_vertices, cliques_ct, edge_fraction);
     } else {
-      if g.max_active_clique_index + 1 < best_result {
-        best_result = g.max_active_clique_index + 1;
-        println!("\nNew best result: {} (vs {})", best_result, num_cliques);
+      if g.cliques_ct < best_result {
+        best_result = g.cliques_ct;
+        println!("\nNew best result: {} (vs {})", best_result, cliques_ct);
         println!("{}", g.to_string());
       }
       g.conform_cliques_to_vertices();
