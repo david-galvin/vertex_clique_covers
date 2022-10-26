@@ -25,7 +25,6 @@
 use bitvec_simd::BitVec; // https://docs.rs/bitvec_simd/0.20.5/bitvec_simd/struct.BitVecSimd.html
 use smallvec::{smallvec, SmallVec}; // https://docs.rs/smallvec/1.10.0/smallvec/struct.SmallVec.html
 use std::env;
-use std::time::Duration;
 use std::time::Instant;
 
 // The neighbors of a clique are those vertices that are not in the clique,
@@ -136,7 +135,6 @@ struct Graph {
   vertices: SmallVec<[Clique; 256]>,
   cliques: SmallVec<[Clique; 256]>,
   max_active_clique_index: usize,
-  clique_order: SmallVec<[usize; 256]>,
   utility_bv: BitVec,
 }
 
@@ -158,7 +156,6 @@ impl Graph {
       vertices: vertices_vec,
       cliques: cliques_vec,
       max_active_clique_index: num_vertices - 1,
-      clique_order: smallvec![],
       utility_bv: BitVec::zeros(num_vertices),
     }
   }
@@ -225,20 +222,6 @@ impl Graph {
     self.cliques[0..(self.max_active_clique_index + 1)].reverse();
   }
 
-  /*  fn merge_cliques_by_indices(&mut self, clique_ids_to_merge: &SmallVec<[usize; 256]>) {
-    let min_id: usize = *clique_ids_to_merge.iter().min().unwrap();
-    let (cliques_to_min, cliques_after_min) = self.cliques.split_at_mut(min_id + 1);
-    let mut clique_into: &mut Clique = &mut cliques_to_min[min_id];
-    for i in 0..(clique_ids_to_merge.len()) {
-      if clique_ids_to_merge[i] == min_id {
-        continue;
-      }
-      let mut clique_from: &mut Clique =
-        &mut cliques_after_min[clique_ids_to_merge[i] - min_id - 1];
-      Graph::merge_cliques(&mut clique_into, &mut clique_from);
-    }
-  }*/
-
   fn vcc_greedy(&mut self) {
     // Try to merge every active pair of cliques
     for i in 0..self.max_active_clique_index {
@@ -289,29 +272,8 @@ impl Graph {
     } else {
       self.shuffle_active_cliques();
     }
-    //self.reset_cliques_in_active_clique_order();
     self.vcc_greedy();
   }
-  /*
-  fn vcc_run_iterations(&mut self, num_iterations: usize) {
-    let mut cur_size: usize = self.size;
-    for i in 1..(num_iterations + 1) {
-      self.vcc_iterated_greedy();
-      if i % 100000 == 0 {
-        println!("Iteration {}", i);
-      }
-      if self.max_active_clique_index + 1 < cur_size {
-        println!(
-          "Iteration {}: {} -> {}",
-          i,
-          cur_size,
-          self.max_active_clique_index + 1
-        );
-        println!("{}", self.to_string());
-        cur_size = self.max_active_clique_index + 1;
-      }
-    }
-  }*/
 
   fn vcc_run_iterations_to_target(
     &mut self,
@@ -342,60 +304,6 @@ impl Graph {
     }
     false
   }
-
-  /*  fn vcc_run_iterations_to_target(
-    &mut self,
-    num_iterations: usize,
-    target: usize,
-    reverse_fraction: f64,
-  ) -> bool {
-    let mut cur_min_clique_size: usize = self.size;
-    let mut pri_min_clique_size: usize = self.size;
-    let mut printed_graph: bool = false;
-    let mut best_num_cliques: usize = self.max_active_clique_index + 1;
-    for i in 1..(num_iterations + 1) {
-      self.vcc_iterated_greedy(reverse_fraction);
-      if self.max_active_clique_index + 1 <= target {
-        println!(
-          "Iteration {}: {} vs {}",
-          i,
-          self.max_active_clique_index + 1,
-          target
-        );
-        return true;
-      } else {
-        if self.max_active_clique_index + 1 < best_num_cliques {
-          best_num_cliques = self.max_active_clique_index + 1;
-          cur_min_clique_size = self.size;
-          pri_min_clique_size = self.size;
-        }
-        for j in 0..(self.max_active_clique_index + 1) {
-          if self.cliques[j].members_ct < cur_min_clique_size {
-            cur_min_clique_size = self.cliques[j].members_ct;
-          }
-        }
-        if cur_min_clique_size < pri_min_clique_size {
-          pri_min_clique_size = cur_min_clique_size;
-          if i >= 0 {
-            if !printed_graph {
-              printed_graph = true;
-              println!("{}\n\n", self.to_vertex_string());
-            }
-            println!("{}.{}: itr {}", best_num_cliques, cur_min_clique_size, i);
-            println!("{}\n\n", self.to_string());
-          }
-        }
-      }
-    }
-    println!(
-      "Iteration {}: {} vs {}",
-      num_iterations,
-      self.max_active_clique_index + 1,
-      target
-    );
-    println!("{}", self.to_string());
-    return false;
-  }*/
 
   fn conform_cliques_to_vertices(&mut self) {
     for i in 0..self.size {
