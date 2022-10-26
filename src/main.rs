@@ -25,8 +25,8 @@
 use bitvec_simd::BitVec; // https://docs.rs/bitvec_simd/0.20.5/bitvec_simd/struct.BitVecSimd.html
 use smallvec::{smallvec, SmallVec}; // https://docs.rs/smallvec/1.10.0/smallvec/struct.SmallVec.html
 use std::env;
-use std::time::{Instant};
 use std::time::Duration;
+use std::time::Instant;
 
 // The neighbors of a clique are those vertices that are not in the clique,
 // and are adjacent to every vertex in the clique.
@@ -167,8 +167,8 @@ impl Graph {
     clique_into: &mut Clique,
     clique_from: &mut Clique,
     utility_bv: &mut BitVec,
-    vertices_vec: &SmallVec<[Clique; 256]>) {
-      
+    vertices_vec: &SmallVec<[Clique; 256]>,
+  ) {
     if !clique_into.has_neighbors {
       return;
     }
@@ -191,15 +191,19 @@ impl Graph {
     clique_from.neighbors_bv.set_all_true();
     for i in (0..clique_from.members_ct).rev() {
       if utility_bv.get_unchecked(clique_from.members[i]) {
-        clique_into.neighbors_bv.and_inplace(&vertices_vec[clique_from.members[i]].neighbors_bv);
+        clique_into
+          .neighbors_bv
+          .and_inplace(&vertices_vec[clique_from.members[i]].neighbors_bv);
         clique_into.members.push(clique_from.members.swap_remove(i));
         clique_from.members_ct -= 1;
         clique_into.members_ct += 1;
       } else {
-        clique_from.neighbors_bv.and_inplace(&vertices_vec[clique_from.members[i]].neighbors_bv);
+        clique_from
+          .neighbors_bv
+          .and_inplace(&vertices_vec[clique_from.members[i]].neighbors_bv);
       }
     }
-    
+
     if clique_from.members_ct == 0 {
       clique_from.neighbors_bv.set_all_false();
       clique_from.is_active = false;
@@ -207,12 +211,11 @@ impl Graph {
       // If nothing else, it has some neighbors in clique_into
       clique_from.has_neighbors = true;
     }
-    
+
     if clique_into.neighbors_bv.none() {
       clique_into.has_neighbors = false;
     }
   }
-
 
   fn shuffle_active_cliques(&mut self) {
     fastrand::shuffle(&mut self.cliques[0..(self.max_active_clique_index + 1)]);
@@ -236,7 +239,6 @@ impl Graph {
     }
   }*/
 
-  
   fn vcc_greedy(&mut self) {
     // Try to merge every active pair of cliques
     for i in 0..self.max_active_clique_index {
@@ -254,7 +256,8 @@ impl Graph {
           cliques_i,
           cliques_j,
           &mut self.utility_bv,
-          &self.vertices);
+          &self.vertices,
+        );
       }
     }
     // update cliques so active cliques precede inactive cliques
@@ -321,22 +324,21 @@ impl Graph {
     for i in 1..(num_iterations + 1) {
       self.vcc_iterated_greedy(reverse_fraction);
       if i % 1_000_000 == 0 || self.max_active_clique_index + 1 < pri_cliques {
-        println!("Iteration {:0>3}_{:0>3}_{:0>3}: {} -> {} ({:?})", (i%1_000_000_000)/1_000_000, (i%1_000_000)/1_000, i%1000, pri_cliques, self.max_active_clique_index + 1, current.elapsed());
+        println!(
+          "Iteration {:0>3}_{:0>3}_{:0>3}: {} -> {} ({:?})",
+          (i % 1_000_000_000) / 1_000_000,
+          (i % 1_000_000) / 1_000,
+          i % 1000,
+          pri_cliques,
+          self.max_active_clique_index + 1,
+          current.elapsed()
+        );
         current = Instant::now();
         pri_cliques = self.max_active_clique_index + 1;
         if self.max_active_clique_index + 1 <= target {
           return true;
         }
       }
-      /*if self.max_active_clique_index < target {
-        println!(
-          "Iteration {}: {} vs {}",
-          i,
-          self.max_active_clique_index + 1,
-          target
-        );
-        return true;
-      }*/
     }
     false
   }
@@ -401,42 +403,6 @@ impl Graph {
     }
     self.max_active_clique_index = self.size - 1;
   }
-
-  /*  fn mis_run_iterations(&mut self, num_iterations: usize) {
-    let mut neighbors_bv: BitVec = BitVec::zeros(self.size);
-    let mut ids: SmallVec<[usize; 256]> = smallvec![];
-    let mut max_ind_set: SmallVec<[usize; 256]> = smallvec![];
-    for i in 0..self.size {
-      ids.push(i);
-    }
-    let mut max_ind_set_size = 0;
-    for i in 1..(num_iterations + 1) {
-      neighbors_bv.set_all_false();
-      fastrand::shuffle(&mut ids);
-      max_ind_set.clear();
-      let mut l = 0;
-      let mut r = ids.len() - 1;
-      while l < r {
-        if !neighbors_bv.get_unchecked(self.vertices[ids[l]].id) {
-          max_ind_set.push(ids[l]);
-          neighbors_bv.or_inplace(&self.vertices[ids[l]].neighbors_bv);
-          l += 1
-        } else {
-          ids.swap(l, r);
-          r -= 1;
-        }
-      }
-      if max_ind_set.len() > max_ind_set_size {
-        println!(
-          "Iteration {}: {} -> {}",
-          i,
-          max_ind_set_size,
-          max_ind_set.len()
-        );
-        max_ind_set_size = max_ind_set.len();
-      }
-    }
-  }*/
 
   fn to_vertex_string(&self) -> String {
     let mut ret_str = String::new();
@@ -550,7 +516,6 @@ fn main() {
   let mut best_result: usize = num_vertices;
   loop {
     if g.vcc_run_iterations_to_target(max_iterations, num_cliques, reverse_fraction) {
-      
       println!("\n{}", g.to_string());
       g = get_random_graph_with_k_cliques(num_vertices, num_cliques, edge_fraction);
     } else {
@@ -566,32 +531,4 @@ fn main() {
   //println!("{}", g.to_string());
 }
 
-/*
-fn main() {
-  let args: Vec<String> = env::args().collect();
-  let num_vertices: usize = 205;
-  let num_cliques: usize = 9;
-  let edge_fraction: f64 = 0.75;
-  let max_iterations: usize = 500000;
-  clear_screen();
-  let mut g = get_random_graph_with_k_cliques(num_vertices, num_cliques, edge_fraction);
-
-  loop {
-    if g.vcc_run_iterations_to_target(max_iterations, num_cliques) {
-      g = get_random_graph_with_k_cliques(num_vertices, num_cliques, edge_fraction);
-    } else {
-      g.conform_cliques_to_vertices();
-      g.shuffle_active_cliques();
-    }
-  }
-  //println!("{}", g.to_string());
-}
-*/
-
-#[cfg(test)]
-mod tests {
-  #[test]
-  fn it_works() {
-    assert_eq!(2 + 2, 4);
-  }
-}
+//cargo run --release 205 12 0.75 100_000_000_000 0
