@@ -26,6 +26,7 @@ use bitvec_simd::BitVec; // https://docs.rs/bitvec_simd/0.20.5/bitvec_simd/struc
 use smallvec::{smallvec, SmallVec}; // https://docs.rs/smallvec/1.10.0/smallvec/struct.SmallVec.html
 use std::env;
 use std::time::Instant;
+use thousands::Separable;
 
 // The neighbors of a clique are those vertices that are not in the clique,
 // and are adjacent to every vertex in the clique.
@@ -160,6 +161,53 @@ impl Graph {
     }
   }
 
+  fn activate_inactive_clique(&mut self) -> bool {
+    if self.size == self.cliques_ct {
+      return false;
+    }
+
+    self.cliques[self.cliques_ct].is_active = true;
+    self.cliques_ct += 1;
+    true
+  }
+
+  fn transfer_vertex_into_clique(
+    clique_into: &mut Clique,
+    clique_from: &mut Clique,
+    utility_bv: &mut BitVec,
+    vertices_vec: &SmallVec<[Clique; 256]>,
+    vertex_id: usize,
+  ) {
+    if !clique_into.has_neighbors {
+      return;
+    }
+
+    if !clique_from.members_bv.get_unchecked(vertex_id) {
+      return;
+    }
+
+    if !clique_into.neighbors_bv.get_unchecked(vertex_id) {
+      return;
+    }
+
+    if !clique_into.is_active {
+      return;
+    }
+
+    // clear utility_bv
+    utility_bv.set_all_false();
+
+    // set utility_bv to be true for all transferrable vertices
+    utility_bv.set(vertex_id, true);
+
+    Self::transfer_vertices_in_utility_bv_between_cliques(
+      clique_into,
+      clique_from,
+      utility_bv,
+      vertices_vec,
+    )
+  }
+
   fn transfer_compatible_vertices(
     clique_into: &mut Clique,
     clique_from: &mut Clique,
@@ -180,6 +228,20 @@ impl Graph {
       return;
     }
 
+    Self::transfer_vertices_in_utility_bv_between_cliques(
+      clique_into,
+      clique_from,
+      utility_bv,
+      vertices_vec,
+    )
+  }
+
+  fn transfer_vertices_in_utility_bv_between_cliques(
+    clique_into: &mut Clique,
+    clique_from: &mut Clique,
+    utility_bv: &mut BitVec,
+    vertices_vec: &SmallVec<[Clique; 256]>,
+  ) {
     // update members_bv for both cliques
     clique_into.members_bv.or_inplace(utility_bv);
     clique_from.members_bv.xor_inplace(utility_bv);
@@ -202,7 +264,8 @@ impl Graph {
     }
 
     if clique_from.members_ct == 0 {
-      clique_from.neighbors_bv.set_all_false();
+      clique_from.neighbors_bv.set_all_true();
+      clique_from.has_neighbors = true;
       clique_from.is_active = false;
     } else {
       // If nothing else, it has some neighbors in clique_into
@@ -278,10 +341,49 @@ impl Graph {
   ) -> bool {
     let mut pri_cliques = self.cliques_ct;
     let mut current = Instant::now();
+    let mut vertex_id_to_transfer: usize;
+    let mut iterations_per_annealing: usize = 1_000_000;
+    let annealings_per_slowdown: usize = 1; //100;
+    let mut cur_annealing_iterations: usize = 0;
+    let mut cur_annealing_annealings: usize = 0;
     for i in 1..(num_iterations + 1) {
+      cur_annealing_iterations += 1;
+      // Anneal!
+      if cur_annealing_iterations >= iterations_per_annealing {
+        cur_annealing_iterations = 0;
+        cur_annealing_annealings += 1;
+        if cur_annealing_annealings >= annealings_per_slowdown {
+          cur_annealing_annealings = 0;
+          iterations_per_annealing += iterations_per_annealing / 50; //*= 2;
+        }
+
+        // activate a new clique
+        self.activate_inactive_clique();
+
+        // Transfer a random vertex from the first clique into the new clique
+        vertex_id_to_transfer = fastrand::usize(..self.cliques[0].members_ct);
+
+        let (cliques_before_new, cliques_from_new) = self.cliques.split_at_mut(self.cliques_ct - 1);
+        let clique_from: &mut Clique = &mut cliques_before_new[0];
+        let clique_into: &mut Clique = &mut cliques_from_new[0];
+
+        Self::transfer_vertex_into_clique(
+          clique_into,
+          clique_from,
+          &mut self.utility_bv,
+          &self.vertices,
+          vertex_id_to_transfer,
+        );
+        // run one iteration with reverse fraction at 100% (so the new guy is first)
+        self.vcc_iterated_greedy(1.0);
+      }
       self.vcc_iterated_greedy(reverse_fraction);
       if i % 1_000_000 == 0 || self.cliques_ct < pri_cliques {
-        println!(
+        if self.cliques_ct < pri_cliques {
+          cur_annealing_iterations = 0;
+        }
+
+        /*println!(
           "Iteration {:0>3}_{:0>3}_{:0>3}: {} -> {} ({:?})",
           (i % 1_000_000_000) / 1_000_000,
           (i % 1_000_000) / 1_000,
@@ -289,10 +391,14 @@ impl Graph {
           pri_cliques,
           self.cliques_ct,
           current.elapsed()
-        );
+        );*/
         current = Instant::now();
         pri_cliques = self.cliques_ct;
         if self.cliques_ct <= target {
+          println!(
+            "iter, {}, iterations per annealing, {}",
+            i.separate_with_commas(), iterations_per_annealing.separate_with_commas()
+          );
           return true;
         }
       }
@@ -425,7 +531,7 @@ fn main() {
       if g.cliques_ct < best_result {
         best_result = g.cliques_ct;
         println!("\nNew best result: {} (vs {})", best_result, cliques_ct);
-        println!("{}", g.to_string());
+        //println!("{}", g.to_string());
       }
       g.conform_cliques_to_vertices();
       g.shuffle_active_cliques();
